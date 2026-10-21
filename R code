@@ -1,0 +1,1516 @@
+## VARIABLES CONTÍNUES
+
+```{r include=FALSE}
+
+library(readxl)
+library(dplyr)
+library(openxlsx)
+
+```
+
+```{r}
+
+df <- read_excel("D:/La Fe/Proyectos Dafne/Alzheimer/Clean_INMUNEA_ALZHEIMER_DB.xlsx")
+
+df$grupo <- as.factor(df$grupo)
+
+```
+
+```{r eval=FALSE, include=FALSE}
+df$apoe4 <- ifelse(
+is.na(df$apo_sangre),
+NA,
+ifelse(df$apo_sangre %in% c("E3/E4", "E4/E4", "E2/E4"), 1, 0)
+)
+```
+
+```{r}
+families <- list(
+
+  NK = c(
+    "Celulas_NK",
+    "NK_abs",
+    "Células_NKT",
+    "NKT_abs"
+  ),
+
+  hemo = c(
+    "hematies_abs", "hematies_%",
+    "hb", "plaquetas_abs",
+    "neutrofilos_abs", "neutrofilos_%",
+    "monocitos_abs", "monocitos_%",
+    "eosinofilos_abs", "eosinofilos_%",
+    "basofilos_abs", "basofilos_%",
+    "linfocitos_abs", "linfocitos_%",
+    "linfocitos_cd45"
+  ),
+
+  B = c(
+    "total%", "total_abs",
+    "naive", "naive_abs",
+    "postCG", "postCG_abs",
+    "postCG_unsw", "postCGunsw_abs",
+    "postCG_sw", "postCGsw_abs",
+    "postCG_IgD", "postCGigd_abs"
+  ),
+
+  CD3 = c(
+    "CD3_totales_%", "CD3_abs",
+    "CD4_totales_%", "CD4_total_abs",
+    "CD4+_Naive", "CD4_naive_abs",
+    "CD4+_Mem_central", "CD4+_memoria_central_abs",
+    "CD4+_Mem_efectora", "CD4+_mem_efectora_abs",
+    "CD4+_efectora_terminal", "CD4+_efectora_terminal_abs",
+    "CD8_totales", "CD8_total_abs",
+    "CD8+_naive", "CD8+_naive_abs",
+    "CD8+_Mem_central", "CD8+_mem_central_abs",
+    "CD8+_Mem_efectora_ CD27+dim", "CD8+_CD27+dim_abs",
+    "CD8+_Efectora", "CD8+_efectora_abs",
+    "CD8+_Efectora_terminal", "CD8+_efectora_terminal_abs"
+  ),
+
+  T_otras = c(
+    "doble_positivas", "doble_ positivas_abs",
+    "doble_negativas_no_γ/δ", "doble_negativas_no_γ/δ_abs",
+    "doble_negativas_γ/δ", "doble_negativas_γ/δ_abs",
+    "Tregs", "Otros_Tregs", "Tregs_abs",
+    "Treg_memoria_efectora",
+    "Treg_Th1-like", "Treg_Th2-like",
+    "Treg_Th17-like", "Treg_Th22-like",
+    "Th_reguladoras_foliculares"
+  ),
+
+  Th = c(
+    "Th_convencionales", "Th_ convencionales_abs",
+    "Otros_Th_convencionales",
+    "Th9", "Th9_abs",
+    "Th1", "Th1_abs",
+    "Th2", "Th2_abs",
+    "Th17", "Th17_abs",
+    "Th22", "Th22_abs",
+    "Th_foliculares", "Th_foliculares_abs",
+    "Th_foliculares_otros",
+    "Tfh1", "Tfh1_abs",
+    "Tfh2", "Tfh2_abs",
+    "Tfh17", "Tfh17_abs"
+  ),
+
+  Biomarcadors = c(
+    "p-tau_217",
+    "b1-42_lcr",
+    "t-tau_lcr",
+    "p-tau_181_lcr",
+    "b1-40_lcr",
+    "ratiob42-40_lcr",
+    "ratiottau-b42_lcr",
+    "nfl_lcr",
+    "nfl_suero"
+  ),
+
+  Neuro = c("mmse_neuropsico",
+    "cdr_neuropsico",
+    "cdr_tot",
+    "cdrm",
+    "cdro",
+    "cdrr",
+    "cdraf",
+    "cdrad",
+    "cdrc",
+    "rbans_suma",
+    "rbans_escala",
+    "age"
+  )
+)
+
+
+```
+
+```{r}
+library(dplyr)
+library(FSA) #per a Dunn
+
+analisi_func <- function(var, data, family){
+  
+  df <- data %>%
+    select(grupo, all_of(var)) %>%
+    filter(!is.na(.data[[var]]), !is.na(grupo))
+  
+  if(length(unique(df$grupo)) < 2) return(NULL)
+  
+ 
+#Kruskal-Wallis (sense formula string)
+kw <- kruskal.test(df[[var]] ~ df$grupo)
+
+
+
+  
+  
+  #Mitjanes per grup
+  stats <- df %>%
+    group_by(grupo) %>%
+    summarise(
+      mean = mean(.data[[var]]),
+      sd = sd(.data[[var]]),
+      n = n(),
+      .groups = "drop"
+    )
+  
+#Posthoc Dunn
+dunn <- dunnTest(x = df[[var]], g = df$grupo, method = "bh")
+  
+  list(
+    variable = var,
+    familia = family,
+    kruskal_p = kw$p.value,
+    stats = stats,
+    posthoc = dunn$res
+  )
+}
+```
+
+```{r}
+resultats <- list()
+
+for(fam in names(families)){
+  vars <- families[[fam]]
+  
+  res <- lapply(vars, function(v){
+    analisi_func(v, df, fam)
+  })
+  
+  # eliminar NULLs
+  res <- res[!sapply(res, is.null)]
+  
+  if(length(res) > 0){
+    
+    df_res <- do.call(rbind, lapply(res, function(x){
+      
+      # stats en format ample
+      st <- x$stats
+      
+      mean_0 <- st$mean[st$grupo == 0]
+      sd_0   <- st$sd[st$grupo == 0]
+      
+      mean_1 <- st$mean[st$grupo == 1]
+      sd_1   <- st$sd[st$grupo == 1]
+      
+      mean_2 <- st$mean[st$grupo == 2]
+      sd_2   <- st$sd[st$grupo == 2]
+      
+      # Dunn posthoc
+      dunn <- x$posthoc
+      
+      p_01 <- dunn$P.adj[dunn$Comparison == "0 - 1"]
+      p_02 <- dunn$P.adj[dunn$Comparison == "0 - 2"]
+      p_12 <- dunn$P.adj[dunn$Comparison == "1 - 2"]
+      
+      data.frame(
+        variable = x$variable,
+        familia = x$familia,
+        
+        mean_0 = mean_0, sd_0 = sd_0,
+        mean_1 = mean_1, sd_1 = sd_1,
+        mean_2 = mean_2, sd_2 = sd_2,
+        
+        kruskal_p = x$kruskal_p,
+        
+        p_0_1 = p_01,
+        p_0_2 = p_02,
+        p_1_2 = p_12
+      )
+    }))
+    
+    # ajust BH sobre el p global
+    df_res$p_adj_global <- p.adjust(df_res$kruskal_p, method = "BH")
+    
+    resultats[[fam]] <- df_res
+  }
+}
+
+final <- bind_rows(resultats)
+```
+
+## VARIABLES DICOTÒMIQUES
+
+```{r}
+#FAMILIES DE VARIABLES dicotòmiques
+families_b <- list(
+
+  Comorbiditats = c(
+    "HTA",
+    "DM",
+    "DLP",
+    "cvd",
+    "cic",
+    "ai",
+    "Cancer",
+    "ckd"
+  ),
+
+  Farmacs = c(
+    "Statin",
+    "Antiepileptic",
+    "Antidepressant",
+    "Antihypertensive",
+    "Corticoid",
+    "IS",
+    "AINEs"
+  ),
+
+  Estil_vida = c(
+    "alcohol",
+    "tobacco",
+    "socioeconomy",
+    "sex",
+    "apoe4"
+  )
+
+)
+
+```
+
+```{r}
+# FUNCIÓ PER A CHI QUADRAT
+analisi_binaria <- function(var, data, family){
+  
+  tmp <- data[, c(var, "grupo")]
+  tmp <- tmp[complete.cases(tmp), ]
+  
+  tabla <- table(tmp[[var]], tmp$grupo)
+  if(nrow(tabla) < 2 | ncol(tabla) < 2) return(NULL)
+  
+  # test global
+  p_global <- if(any(tabla < 5)){
+    fisher.test(tabla)$p.value
+  } else {
+    chisq.test(tabla)$p.value
+  }
+  
+  # percentatges
+  prop <- prop.table(tabla, 2) * 100
+  
+  get <- function(r, c){
+    if(r %in% rownames(prop) & c %in% colnames(prop)){
+      as.numeric(prop[r, c])
+    } else NA_real_
+  }
+  
+  perc_0 <- get("1","0")
+  perc_1 <- get("1","1")
+  perc_2 <- get("1","2")
+  
+  # Ns
+  n_0 <- if("0" %in% colnames(tabla)) sum(tabla[,"0"]) else NA
+  n_1 <- if("1" %in% colnames(tabla)) sum(tabla[,"1"]) else NA
+  n_2 <- if("2" %in% colnames(tabla)) sum(tabla[,"2"]) else NA
+  
+  # pairwise
+  combs <- combn(colnames(tabla), 2)
+  
+  get_p <- function(g1, g2){
+    if(!(g1 %in% colnames(tabla) & g2 %in% colnames(tabla))) return(NA_real_)
+    
+    t2 <- tabla[, c(g1, g2), drop = FALSE]
+    
+    if(any(t2 < 5)){
+      fisher.test(t2)$p.value
+    } else {
+      chisq.test(t2)$p.value
+    }
+  }
+  
+  p_0_1 <- get_p("0","1")
+  p_0_2 <- get_p("0","2")
+  p_1_2 <- get_p("1","2")
+  
+  data.frame(
+    variable = var,
+    familia = family,
+    
+    perc_0 = round(perc_0,2),
+    perc_1 = round(perc_1,2),
+    perc_2 = round(perc_2,2),
+    
+    n_0 = n_0,
+    n_1 = n_1,
+    n_2 = n_2,
+    
+    p_global = p_global,
+    
+    p_0_1 = p_0_1,
+    p_0_2 = p_0_2,
+    p_1_2 = p_1_2
+  )
+}
+```
+
+```{r}
+resultats_bin <- list()
+
+for(fam in names(families_b)){
+  
+  vars <- families_b[[fam]]
+  
+  res <- lapply(vars, function(v){
+    analisi_binaria(v, df, fam)
+  })
+  
+  res <- res[!sapply(res, is.null)]
+  
+  if(length(res) > 0){
+    
+    df_res <- do.call(rbind, lapply(res, function(x){
+      
+      data.frame(
+        variable = x$variable,
+        familia = x$familia,
+        
+        # format tipus contínues: % (n)
+        grup_0 = paste0(x$perc_0, " (", x$n_0, ")"),
+        grup_1 = paste0(x$perc_1, " (", x$n_1, ")"),
+        grup_2 = paste0(x$perc_2, " (", x$n_2, ")"),
+        
+        p_global = x$p_global,
+        
+        p_0_1 = x$p_0_1,
+        p_0_2 = x$p_0_2,
+        p_1_2 = x$p_1_2
+      )
+    }))
+    
+    # ajustos
+    df_res$p_adj_global <- p.adjust(df_res$p_global, method = "BH")
+    
+    df_res$p_0_1_adj <- p.adjust(df_res$p_0_1, method = "BH")
+    df_res$p_0_2_adj <- p.adjust(df_res$p_0_2, method = "BH")
+    df_res$p_1_2_adj <- p.adjust(df_res$p_1_2, method = "BH")
+    
+    resultats_bin[[fam]] <- df_res
+  }
+}
+
+final_bin <- dplyr::bind_rows(resultats_bin)
+final_bin
+
+```
+
+## VARIABLES QUALI NO DICOTÒMIQUES
+
+```{r}
+
+vars_multi <- c(
+  "fazekas rm",
+  "study",
+  "socioeconomy",
+  "apo_sangre"
+)
+
+resultats_multi <- lapply(vars_multi, function(v){
+  
+  tmp <- df[, c(v, "grupo")]
+  tmp <- tmp[complete.cases(tmp), ]
+  
+  tabla <- table(tmp[[v]], tmp$grupo)
+  
+  if(nrow(tabla) < 2 | ncol(tabla) < 2) return(NULL)
+  
+  # p global
+  p_global <- if(any(tabla < 5)){
+    fisher.test(tabla)$p.value
+  } else {
+    chisq.test(tabla)$p.value
+  }
+  
+  # Ns per grup
+  n_0 <- if("0" %in% colnames(tabla)) sum(tabla[,"0"]) else NA
+  n_1 <- if("1" %in% colnames(tabla)) sum(tabla[,"1"]) else NA
+  n_2 <- if("2" %in% colnames(tabla)) sum(tabla[,"2"]) else NA
+  
+  # pairwise
+  get_p <- function(g1, g2){
+    if(!(g1 %in% colnames(tabla) & g2 %in% colnames(tabla))) return(NA_real_)
+    
+    t2 <- tabla[, c(g1, g2), drop = FALSE]
+    
+    if(any(t2 < 5)){
+      fisher.test(t2)$p.value
+    } else {
+      chisq.test(t2)$p.value
+    }
+  }
+  
+  p_0_1 <- get_p("0","1")
+  p_0_2 <- get_p("0","2")
+  p_1_2 <- get_p("1","2")
+  
+  data.frame(
+    variable = v,
+    
+    n_0 = n_0,
+    n_1 = n_1,
+    n_2 = n_2,
+    
+    p_global = p_global,
+    
+    p_0_1 = p_0_1,
+    p_0_2 = p_0_2,
+    p_1_2 = p_1_2
+  )
+})
+
+resultats_multi <- dplyr::bind_rows(resultats_multi)
+
+# ajustos
+resultats_multi$p_adj_global <- p.adjust(resultats_multi$p_global, method = "BH")
+
+resultats_multi$p_0_1_adj <- p.adjust(resultats_multi$p_0_1, method = "BH")
+resultats_multi$p_0_2_adj <- p.adjust(resultats_multi$p_0_2, method = "BH")
+resultats_multi$p_1_2_adj <- p.adjust(resultats_multi$p_1_2, method = "BH")
+
+resultats_multi
+```
+
+## AJUST PER SEXE I EDAT
+
+```{r}
+families <- list(
+
+  NK = c(
+    "Celulas_NK",
+    "NK_abs",
+    "Células_NKT",
+    "NKT_abs"
+  ),
+
+  hemo = c(
+    "hematies_abs", "hematies_%",
+    "hb", "plaquetas_abs",
+    "neutrofilos_abs", "neutrofilos_%",
+    "monocitos_abs", "monocitos_%",
+    "eosinofilos_abs", "eosinofilos_%",
+    "basofilos_abs", "basofilos_%",
+    "linfocitos_abs", "linfocitos_%",
+    "linfocitos_cd45"
+  ),
+
+  B = c(
+    "total%", "total_abs",
+    "naive", "naive_abs",
+    "postCG", "postCG_abs",
+    "postCG_unsw", "postCGunsw_abs",
+    "postCG_sw", "postCGsw_abs",
+    "postCG_IgD", "postCGigd_abs"
+  ),
+
+  CD3 = c(
+    "CD3_totales_%", "CD3_abs",
+    "CD4_totales_%", "CD4_total_abs",
+    "CD4+_Naive", "CD4_naive_abs",
+    "CD4+_Mem_central", "CD4+_memoria_central_abs",
+    "CD4+_Mem_efectora", "CD4+_mem_efectora_abs",
+    "CD4+_efectora_terminal", "CD4+_efectora_terminal_abs",
+    "CD8_totales", "CD8_total_abs",
+    "CD8+_naive", "CD8+_naive_abs",
+    "CD8+_Mem_central", "CD8+_mem_central_abs",
+    "CD8+_Mem_efectora_ CD27+dim", "CD8+_CD27+dim_abs",
+    "CD8+_Efectora", "CD8+_efectora_abs",
+    "CD8+_Efectora_terminal", "CD8+_efectora_terminal_abs"
+  ),
+
+  T_otras = c(
+    "doble_positivas", "doble_ positivas_abs",
+    "doble_negativas_no_γ/δ", "doble_negativas_no_γ/δ_abs",
+    "doble_negativas_γ/δ", "doble_negativas_γ/δ_abs",
+    "Tregs", "Otros_Tregs", "Tregs_abs",
+    "Treg_memoria_efectora",
+    "Treg_Th1-like", "Treg_Th2-like",
+    "Treg_Th17-like", "Treg_Th22-like",
+    "Th_reguladoras_foliculares"
+  ),
+
+  Th = c(
+    "Th_convencionales", "Th_ convencionales_abs",
+    "Otros_Th_convencionales",
+    "Th9", "Th9_abs",
+    "Th1", "Th1_abs",
+    "Th2", "Th2_abs",
+    "Th17", "Th17_abs",
+    "Th22", "Th22_abs",
+    "Th_foliculares", "Th_foliculares_abs",
+    "Th_foliculares_otros",
+    "Tfh1", "Tfh1_abs",
+    "Tfh2", "Tfh2_abs",
+    "Tfh17", "Tfh17_abs"
+  ),
+
+  Biomarcadors = c(
+    "p-tau_217",
+    "b1-42_lcr",
+    "t-tau_lcr",
+    "p-tau_181_lcr",
+    "b1-40_lcr",
+    "ratiob42-40_lcr",
+    "ratiottau-b42_lcr",
+    "nfl_lcr",
+    "nfl_suero"
+  ),
+
+  Neuro = c("mmse_neuropsico",
+    "cdr_neuropsico",
+    "cdr_tot",
+    "cdrm",
+    "cdro",
+    "cdrr",
+    "cdraf",
+    "cdrad",
+    "cdrc",
+    "rbans_suma",
+    "rbans_escala"
+    )
+)
+
+
+```
+
+```{r}
+
+## models lineals bivariants ajustats ANCOVA pairwise
+library(dplyr)
+
+resultats_adj <- list()
+
+for(fam in names(families)){
+  
+  vars <- families[[fam]]
+  
+  res_fam <- lapply(vars, function(var){
+    
+    df2 <- df[, c(var, "grupo", "age", "sex")]
+    df2 <- df2[complete.cases(df2), ]
+    
+    if(length(unique(df2$grupo)) < 2) return(NULL)
+    
+    df2$grupo <- factor(df2$grupo)
+    df2$sex   <- factor(df2$sex)
+    
+    y <- df2[[var]]
+    
+    # MODEL GLOBAL
+    fit <- lm(y ~ grupo + age + sex, data = df2)
+    p_global <- tryCatch(anova(fit)["grupo", "Pr(>F)"], error = function(e) NA_real_)
+    
+    # DESCRIPTIUS
+    stats <- df2 %>%
+      group_by(grupo) %>%
+      summarise(mean = mean(y), sd = sd(y), .groups="drop")
+    
+    mean_0 <- stats$mean[stats$grupo==0]
+    sd_0   <- stats$sd[stats$grupo==0]
+    
+    mean_1 <- stats$mean[stats$grupo==1]
+    sd_1   <- stats$sd[stats$grupo==1]
+    
+    mean_2 <- stats$mean[stats$grupo==2]
+    sd_2   <- stats$sd[stats$grupo==2]
+    
+    # 🔥 COMPARACIONS PAIRWISE (això NO falla)
+    
+    get_p <- function(g1, g2){
+      
+      sub <- df2[df2$grupo %in% c(g1,g2), ]
+      
+      if(length(unique(sub$grupo)) < 2) return(NA_real_)
+      
+      
+y_sub <- sub[[var]]
+fit2 <- lm(y_sub ~ grupo + age + sex, data = sub)
+
+      
+      coef_name <- grep("grupo", rownames(summary(fit2)$coefficients), value=TRUE)
+      
+      if(length(coef_name)==0) return(NA_real_)
+      
+      summary(fit2)$coefficients[coef_name[1], "Pr(>|t|)"]
+    }
+    
+    p_0_1 <- get_p(0,1)
+    p_0_2 <- get_p(0,2)
+    p_1_2 <- get_p(1,2)
+    
+    data.frame(
+      variable = var,
+      familia = fam,
+      
+      mean_0 = mean_0, sd_0 = sd_0,
+      mean_1 = mean_1, sd_1 = sd_1,
+      mean_2 = mean_2, sd_2 = sd_2,
+      
+      p_global = p_global,
+      p_0_1 = p_0_1,
+      p_0_2 = p_0_2,
+      p_1_2 = p_1_2
+    )
+  })
+  
+  res_fam <- res_fam[!sapply(res_fam, is.null)]
+  
+  if(length(res_fam) > 0){
+    
+    df_res <- bind_rows(res_fam)
+    
+    # AJUSTOS
+    df_res$p_adj_global <- p.adjust(df_res$p_global, method = "BH")
+    
+    df_res$p_0_1_adj <- p.adjust(df_res$p_0_1, method = "BH")
+    df_res$p_0_2_adj <- p.adjust(df_res$p_0_2, method = "BH")
+    df_res$p_1_2_adj <- p.adjust(df_res$p_1_2, method = "BH")
+    
+    resultats_adj[[fam]] <- df_res
+  }
+}
+
+final_adj <- bind_rows(resultats_adj)
+final_adj
+```
+
+```{r}
+
+## models lineals bivariants ajustats ANCOVA pairwise amb CI
+library(dplyr)
+
+resultats_adj <- list()
+
+for(fam in names(families)){
+  
+  vars <- families[[fam]]
+  
+  res_fam <- lapply(vars, function(var){
+    
+    df2 <- df[, c(var, "grupo", "age", "sex")]
+    df2 <- df2[complete.cases(df2), ]
+    
+    if(length(unique(df2$grupo)) < 2) return(NULL)
+    
+    df2$grupo <- factor(df2$grupo)
+    df2$sex   <- factor(df2$sex)
+    
+    y <- df2[[var]]
+    
+    # MODEL GLOBAL
+    fit <- lm(y ~ grupo + age + sex, data = df2)
+    p_global <- tryCatch(anova(fit)["grupo", "Pr(>F)"], error = function(e) NA_real_)
+    
+    # DESCRIPTIUS
+    stats <- df2 %>%
+  group_by(grupo) %>%
+  summarise(
+    n = n(),
+    mean = mean(y, na.rm = TRUE),
+    sd = sd(y, na.rm = TRUE),
+    se = sd / sqrt(n),
+    ci_low = mean - qt(0.975, df = n - 1) * se,
+    ci_high = mean + qt(0.975, df = n - 1) * se,
+    .groups = "drop"
+  )
+
+mean_0    <- stats$mean[stats$grupo == 0]
+ci0_low   <- stats$ci_low[stats$grupo == 0]
+ci0_high  <- stats$ci_high[stats$grupo == 0]
+
+mean_1    <- stats$mean[stats$grupo == 1]
+ci1_low   <- stats$ci_low[stats$grupo == 1]
+ci1_high  <- stats$ci_high[stats$grupo == 1]
+
+mean_2    <- stats$mean[stats$grupo == 2]
+ci2_low   <- stats$ci_low[stats$grupo == 2]
+ci2_high  <- stats$ci_high[stats$grupo == 2]
+    
+    # 🔥 COMPARACIONS PAIRWISE (això NO falla)
+    
+    get_p <- function(g1, g2){
+      
+      sub <- df2[df2$grupo %in% c(g1,g2), ]
+      
+      if(length(unique(sub$grupo)) < 2) return(NA_real_)
+      
+      
+y_sub <- sub[[var]]
+fit2 <- lm(y_sub ~ grupo + age + sex, data = sub)
+
+      
+      coef_name <- grep("grupo", rownames(summary(fit2)$coefficients), value=TRUE)
+      
+      if(length(coef_name)==0) return(NA_real_)
+      
+      summary(fit2)$coefficients[coef_name[1], "Pr(>|t|)"]
+    }
+    
+    p_0_1 <- get_p(0,1)
+    p_0_2 <- get_p(0,2)
+    p_1_2 <- get_p(1,2)
+    
+    data.frame(
+  variable = var,
+  familia = fam,
+
+  mean_0 = mean_0,
+  ci0_low = ci0_low,
+  ci0_high = ci0_high,
+
+  mean_1 = mean_1,
+  ci1_low = ci1_low,
+  ci1_high = ci1_high,
+
+  mean_2 = mean_2,
+  ci2_low = ci2_low,
+  ci2_high = ci2_high,
+
+  p_global = p_global,
+  p_0_1 = p_0_1,
+  p_0_2 = p_0_2,
+  p_1_2 = p_1_2
+)
+  })
+  
+  res_fam <- res_fam[!sapply(res_fam, is.null)]
+  
+  if(length(res_fam) > 0){
+    
+    df_res <- bind_rows(res_fam)
+    
+    # AJUSTOS
+    df_res$p_adj_global <- p.adjust(df_res$p_global, method = "BH")
+    
+    df_res$p_0_1_adj <- p.adjust(df_res$p_0_1, method = "BH")
+    df_res$p_0_2_adj <- p.adjust(df_res$p_0_2, method = "BH")
+    df_res$p_1_2_adj <- p.adjust(df_res$p_1_2, method = "BH")
+    
+    resultats_adj[[fam]] <- df_res
+  }
+}
+
+final_adj_2 <- bind_rows(resultats_adj)
+final_adj_2
+```
+
+```{r}
+library(dplyr)
+library(effectsize)
+
+resultats_adj <- list()
+
+for(fam in names(families)){
+
+  vars <- families[[fam]]
+
+  res_fam <- lapply(vars, function(var){
+
+    df2 <- df[, c(var, "grupo", "age", "sex")]
+    df2 <- df2[complete.cases(df2), ]
+
+    if(nrow(df2) < 5) return(NULL)
+
+    df2$grupo <- factor(df2$grupo)
+    df2$sex <- factor(df2$sex)
+    
+    y <- df2[[var]]
+
+    # MODEL GLOBAL
+    fit <- lm(y ~ grupo + age + sex , data = df2)
+
+    p_global <- tryCatch(
+      anova(fit)["grupo", "Pr(>F)"],
+      error = function(e) NA_real_
+    )
+
+    # DESCRIPTIUS + IC95%
+
+    stats <- df2 %>%
+      group_by(grupo) %>%
+      summarise(
+        n = n(),
+        mean = mean(y, na.rm = TRUE),
+        sd = sd(y, na.rm = TRUE),
+        se = sd / sqrt(n),
+        ci_low = mean - qt(0.975, df = n - 1) * se,
+        ci_high = mean + qt(0.975, df = n - 1) * se,
+        .groups = "drop"
+      )
+
+    mean_0 <- stats$mean[stats$grupo == 0]
+    ci0_low <- stats$ci_low[stats$grupo == 0]
+    ci0_high <- stats$ci_high[stats$grupo == 0]
+
+    mean_1 <- stats$mean[stats$grupo == 1]
+    ci1_low <- stats$ci_low[stats$grupo == 1]
+    ci1_high <- stats$ci_high[stats$grupo == 1]
+
+    mean_2 <- stats$mean[stats$grupo == 2]
+    ci2_low <- stats$ci_low[stats$grupo == 2]
+    ci2_high <- stats$ci_high[stats$grupo == 2]
+
+    # FUNCIÓ COMPARACIONS PAIRWISE
+
+    get_comparison <- function(g1, g2){
+
+      sub <- df2[df2$grupo %in% c(g1, g2), ]
+
+      if(length(unique(sub$grupo)) < 2){
+        return(rep(NA, 7))
+      }
+
+      sub$grupo <- droplevels(sub$grupo)
+
+      y_sub <- sub[[var]]
+
+      fit2 <- lm(
+        y_sub ~ grupo + age + sex ,
+        data = sub
+      )
+
+      coef_name <- grep(
+        "^grupo",
+        rownames(summary(fit2)$coefficients),
+        value = TRUE
+      )
+
+      if(length(coef_name) == 0){
+        return(rep(NA, 7))
+      }
+
+      coef_tab <- summary(fit2)$coefficients
+
+      beta <- coef_tab[coef_name[1], "Estimate"]
+      se_beta <- coef_tab[coef_name[1], "Std. Error"]
+
+      tcrit <- qt(0.975, fit2$df.residual)
+
+      beta_low <- beta - tcrit * se_beta
+      beta_high <- beta + tcrit * se_beta
+
+      pval <- coef_tab[coef_name[1], "Pr(>|t|)"]
+
+      d_res <- tryCatch(
+        effectsize::cohens_d(
+          as.formula(paste(var, "~ grupo")),
+          data = sub,
+          ci = 0.95
+        ),
+        error = function(e) NULL
+      )
+
+      if(is.null(d_res)){
+
+        d <- NA
+        d_low <- NA
+        d_high <- NA
+
+      } else {
+
+        d <- d_res$Cohens_d[1]
+        d_low <- d_res$CI_low[1]
+        d_high <- d_res$CI_high[1]
+
+      }
+
+      c(
+        beta = beta,
+        beta_low = beta_low,
+        beta_high = beta_high,
+        pval = pval,
+        d = d,
+        d_low = d_low,
+        d_high = d_high
+      )
+    }
+
+    comp_0_1 <- get_comparison(0,1)
+    comp_0_2 <- get_comparison(0,2)
+    comp_1_2 <- get_comparison(1,2)
+
+    data.frame(
+
+      variable = var,
+      familia = fam,
+
+      mean_0 = mean_0,
+      ci0_low = ci0_low,
+      ci0_high = ci0_high,
+
+      mean_1 = mean_1,
+      ci1_low = ci1_low,
+      ci1_high = ci1_high,
+
+      mean_2 = mean_2,
+      ci2_low = ci2_low,
+      ci2_high = ci2_high,
+
+      p_global = p_global,
+
+      beta_0_1 = comp_0_1["beta"],
+      beta_0_1_low = comp_0_1["beta_low"],
+      beta_0_1_high = comp_0_1["beta_high"],
+      p_0_1 = comp_0_1["pval"],
+
+      d_0_1 = comp_0_1["d"],
+      d_0_1_low = comp_0_1["d_low"],
+      d_0_1_high = comp_0_1["d_high"],
+
+      beta_0_2 = comp_0_2["beta"],
+      beta_0_2_low = comp_0_2["beta_low"],
+      beta_0_2_high = comp_0_2["beta_high"],
+      p_0_2 = comp_0_2["pval"],
+
+      d_0_2 = comp_0_2["d"],
+      d_0_2_low = comp_0_2["d_low"],
+      d_0_2_high = comp_0_2["d_high"],
+
+      beta_1_2 = comp_1_2["beta"],
+      beta_1_2_low = comp_1_2["beta_low"],
+      beta_1_2_high = comp_1_2["beta_high"],
+      p_1_2 = comp_1_2["pval"],
+
+      d_1_2 = comp_1_2["d"],
+      d_1_2_low = comp_1_2["d_low"],
+      d_1_2_high = comp_1_2["d_high"]
+
+    )
+
+  })
+
+  res_fam <- res_fam[!sapply(res_fam, is.null)]
+
+  if(length(res_fam) > 0){
+
+    df_res <- bind_rows(res_fam)
+
+    df_res$p_adj_global <- p.adjust(df_res$p_global, method = "BH")
+
+    df_res$p_0_1_adj <- p.adjust(df_res$p_0_1, method = "BH")
+    df_res$p_0_2_adj <- p.adjust(df_res$p_0_2, method = "BH")
+    df_res$p_1_2_adj <- p.adjust(df_res$p_1_2, method = "BH")
+
+    resultats_adj[[fam]] <- df_res
+  }
+
+}
+
+final_adj_3 <- bind_rows(resultats_adj)
+```
+
+```{r}
+
+```
+
+## PCA
+
+```{r}
+vars_imm<- c("Treg_Th17-like", "Th9", "Células_NKT", "Celulas_NK", "doble_negativas_no_γ/δ", "doble_negativas_γ/δ")
+
+# subset
+
+df_pca <- df %>%
+  dplyr::select(all_of(vars_imm), grupo) %>%
+  dplyr::filter(complete.cases(.))
+
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(FactoMineR)
+library(factoextra)
+
+
+
+# PCA base R (més control)
+pca <- prcomp(df_pca[, vars_imm], scale. = TRUE)
+
+# extraure components
+scores <- as.data.frame(pca$x)
+scores$grupo <- factor(df_pca$grupo)
+
+# percentatge variància
+var_exp <- round(100 * pca$sdev^2 / sum(pca$sdev^2), 1)
+
+# plot
+ggplot(scores, aes(x = PC1, y = PC2, color = grupo)) +
+  geom_point(size = 3, alpha = 0.8) +
+  stat_ellipse(type = "norm", level = 0.8) +
+  
+  labs(
+    x = paste0("PC1 (", var_exp[1], "%)"),
+    y = paste0("PC2 (", var_exp[2], "%)"),
+    color = "Grupo"
+  ) +
+  
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "right"
+  ) +
+  
+  scale_color_manual(values = c("#1b9e77", "#d95f02", "#7570b3"))
+
+```
+
+```{r}
+fviz_eig(pca)
+```
+
+```{r}
+
+loadings <- as.data.frame(pca$rotation)
+loadings
+
+```
+
+## PERMANOVA
+
+### PERMANOVA AJUSTAT EDAT SEXE
+
+```{r}
+
+
+library(vegan)
+library(dplyr)
+
+df_perm <- df %>%
+  dplyr::select(all_of(vars_imm), grupo, age, sex) %>%
+  filter(complete.cases(.))
+
+# matriu de distàncies
+dist_mat <- dist(df_perm[, vars_imm], method = "euclidean")
+
+# PERMANOVA ajustada 🔥
+res_perm <- adonis2(
+  dist_mat ~ grupo + age + sex,
+  data = df_perm,
+  permutations = 999
+)
+
+res_perm
+
+```
+
+```{r}
+
+
+# funció simple per pairwise
+get_perm <- function(g1, g2){
+  
+  sub <- df_perm %>% filter(grupo %in% c(g1, g2))
+  
+  sub$grupo <- factor(sub$grupo)
+  
+  dist_sub <- dist(sub[, vars_imm], method = "euclidean")
+  
+  res <- adonis2(
+    dist_sub ~ grupo + age + sex,
+    data = sub,
+    permutations = 999
+  )
+  
+  data.frame(
+    comparison = paste0(g1, " vs ", g2),
+    R2 = res$R2[1],
+    F = res$F[1],
+    p_value = res$`Pr(>F)`[1]
+  )
+}
+
+# executar comparacions
+res_01 <- get_perm(0,1)
+res_02 <- get_perm(0,2)
+res_12 <- get_perm(1,2)
+
+pairwise_perm <- bind_rows(res_01, res_02, res_12)
+
+# ajust múltiple
+pairwise_perm$p_adj <- p.adjust(pairwise_perm$p_value, method = "BH")
+
+pairwise_perm
+```
+
+### PERMANOVA AJUSTAT EDAT SEXE APO TRACTAMENTS
+
+```{r}
+
+library(vegan)
+library(dplyr)
+
+df_perm <- df %>%
+  dplyr::select(all_of(vars_imm), grupo, age, sex, apo_sangre,Corticoid, IS, Antiepileptic, Antidepressant, Antihypertensive) %>%
+  filter(complete.cases(.))
+
+# matriu de distàncies
+dist_mat_2 <- dist(df_perm[, vars_imm], method = "euclidean")
+
+# PERMANOVA ajustada 🔥
+res_perm_2 <- adonis2(
+  dist_mat_2 ~ grupo + age + sex + apo_sangre, # +Corticoid + IS, + Antiepileptic+ Antidepressant+ Antihypertensive,
+  data = df_perm,
+  permutations = 999
+)
+
+res_perm_2
+```
+
+### GRÀFICS PERMANOVA
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+#ordre
+
+ordre_vars <- c(
+  "Treg_Th17-like", 
+  "Th9", 
+  "Células_NKT", 
+  "Celulas_NK", 
+  "doble_negativas_no_γ/δ", 
+  "doble_negativas_γ/δ"
+)
+
+
+# dades netes
+df_plot <- df %>%
+  dplyr::select(all_of(vars_imm), grupo) %>%
+  filter(complete.cases(.))
+
+# z-score global (important)
+df_scaled <- df_plot %>%
+  mutate(across(all_of(vars_imm), scale))
+
+# format llarg
+df_long <- df_scaled %>%
+  tidyr::pivot_longer(
+    cols = all_of(vars_imm),
+    names_to = "variable",
+    values_to = "z"
+  )
+
+# resum per grup: mean + sd
+df_sum <- df_long %>%
+  group_by(grupo, variable) %>%
+  summarise(
+    mean = mean(z),
+    sd = sd(z),
+    .groups = "drop"
+  )
+
+df_sum$variable <- factor(df_sum$variable, levels = ordre_vars)
+# plot
+ggplot(df_sum, aes(x = variable, y = mean, color = factor(grupo), group = grupo)) +
+  
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2) +
+  
+  # banda ± SD
+  geom_ribbon(
+    aes(ymin = mean - sd, ymax = mean + sd, fill = factor(grupo)),
+    alpha = 0.05,
+    colour = NA
+  ) +
+  
+  # estil
+  theme_minimal(base_size = 14) +
+  
+  labs(
+    x = NULL,
+    y = "Z-score",
+    color = "Grupo",
+    fill = "Grupo"
+  ) +
+  
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  
+  scale_color_manual(values = c("#1b9e77", "#d95f02", "#7570b3")) +
+  scale_fill_manual(values = c("#1b9e77", "#d95f02", "#7570b3"))
+
+```
+
+## CORRELACIONS
+
+```{r}
+ Biomarcadors = c(
+    "p-tau_217",
+    "b1-42_lcr",
+    "t-tau_lcr",
+    "p-tau_181_lcr",
+    "b1-40_lcr",
+    "ratiob42-40_lcr",
+    "ratiottau-b42_lcr",
+    "nfl_lcr",
+    "nfl_suero"
+  )
+
+  Neuro = c("mmse_neuropsico",
+    "cdr_neuropsico",
+    "cdr_tot",
+    "cdrm",
+    "cdro",
+    "cdrr",
+    "cdraf",
+    "cdrad",
+    "cdrc",
+    "rbans_suma",
+    "rbans_escala",
+    "age"
+  )
+
+  vars_imm<- c("Treg_Th17-like", "Th9", "Células_NKT", "Celulas_NK", "doble_negativas_no_γ/δ", "doble_negativas_γ/δ")
+
+
+  
+```
+
+```{r}
+
+vars <- c(Biomarcadors, Neuro, vars_imm)
+
+df_sub <- df[, vars]
+
+
+df_sub[df_sub == "ND"] <- NA
+df_sub <- data.frame(lapply(df_sub, as.numeric))
+cor_mat <- cor(df_sub, method = "spearman", use = "pairwise.complete.obs")
+
+```
+
+```{r}
+library(Hmisc)
+
+res <- rcorr(as.matrix(df_sub), type = "spearman")
+
+cor_mat <- res$r
+p_mat   <- res$P
+```
+
+```{r}
+library(pheatmap)
+
+pheatmap(cor_mat, na_col = "grey")
+```
+
+```{r}
+
+var_ref <- vars_imm
+var_comp <- c(Neuro,Biomarcadors)
+
+
+r_cross <- cor(df[, vars_imm],
+                 df[, c(Neuro, Biomarcadors)],
+                 method = "spearman",
+                 use = "pairwise.complete.obs")
+
+
+```
+
+```{r}
+library(Hmisc)
+
+vars_all <- c(vars_imm,Biomarcadors)
+
+res <- rcorr(as.matrix(df[, vars_all]), type = "spearman")
+
+r_cross <- res$r[vars_imm, c( Biomarcadors)]
+p_cross <- res$P[vars_imm, c( Biomarcadors)]
+```
+
+```{r}
+library(pheatmap)
+
+pheatmap(r_cross,
+         na_col = "grey",
+         main = "Correlaciones immune vs biomarcadores")
+```
+
+```{r}
+library(tidyverse)
+
+df_top <- as.data.frame(as.table(r_cross)) %>%
+  rename(Immune = Var1, Variable = Var2, r = Freq) %>%
+  mutate(p = as.vector(p_cross)) %>%
+  filter(!is.na(p)) %>%
+  arrange(desc(abs(r))) %>%
+  slice(1:10)
+
+df_top <- df_top %>%
+  mutate(p_adj = p.adjust(p, method = "BH"))
+
+
+df_top
+
+```
+
+```{r}
+p_adj <- matrix(
+  p.adjust(as.vector(p_cross), method = "BH"),
+  nrow = nrow(p_cross),
+  ncol = ncol(p_cross),
+  dimnames = dimnames(p_cross)
+)
+
+```
+
+```{r}
+labels <- matrix(
+  paste0(
+    round(r_cross, 2),
+    ifelse(p_adj < 0.05, "*", "")
+  ),
+  nrow = nrow(r_cross),
+  dimnames = dimnames(r_cross)
+)
+
+pheatmap(
+  r_cross,
+  display_numbers = labels,
+  number_color = "black",
+  na_col = "grey",
+  main = "Spearman correlations"
+)
+```
+
+```{r}
+cor_table <- as.data.frame(as.table(r_cross)) %>%
+  rename(
+    Immune = Var1,
+    Biomarker = Var2,
+    rho = Freq
+  ) %>%
+  mutate(
+    p = as.vector(p_cross),
+    p_FDR = p.adjust(p, method = "BH")
+  ) %>%
+  arrange(p_FDR)
+
+cor_table
+```
+
+### Gràfics de correlacions
+
+```{r}
+library(ggpubr)
+library(ggplot2)
+
+ggplot(df, aes(x = Celulas_NK, y = cdrc)) +
+  geom_point(na.rm = TRUE) +
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  stat_cor(method = "spearman", label.x.npc = "left", label.y.npc = "top") +
+  theme_minimal() +
+  labs(x = "Cèl·lules NK",
+       y = "CDR-C",
+       title = "")
+
+```
+
+```{r}
+ggplot(df, aes(x = `Treg_Th17-like`, y = nfl_lcr, color = grupo)) +
+  geom_point(na.rm = TRUE) +
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  #stat_cor(method = "spearman", label.x.npc = "left", label.y.npc = "top") +
+  theme_minimal() +
+  labs(x = "Treg_Th17-like",
+       y = "nfl_lcr",
+       color = "Grupo",
+       title = "")
+```
+
+```{r}
+ggplot(df, aes(x = `Th9`, y = cdr_tot, color = grupo)) +
+  geom_point(na.rm = TRUE) +
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  stat_cor(method = "spearman", label.x.npc = "left", label.y.npc = "top") +
+  theme_minimal() +
+  labs(x = "Th9",
+       y = "cdr_tot",
+       color = "Grupo",
+       title = "")
+
+```
+
+```{r}
+ggplot(df, aes(x = `doble_negativas_γ/δ`, y = rbans_suma, color = grupo)) +
+  geom_point(na.rm = TRUE) +
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  stat_cor(method = "spearman", label.x.npc = "left", label.y.npc = "top") +
+  theme_minimal() +
+  labs(x = "doble_negativas_γ/δ",
+       y = "rbans_suma",
+       color = "Grupo",
+       title = "")
+```
+
+## MODELS
+
+```{r}
+df_sub2 <- df[df$grupo %in% c(0, 1), ]
+df_model <- df_sub2
+colnames(df_model) <- make.names(colnames(df_model))
+```
+
+```{r}
+model <- glm(grupo ~ age+doble_negativas_γ.δ +doble_negativas_no_γ.δ+ sex,
+             data = df_model,
+             family = binomial)
+
+summary(model)
+```
+
+```{r}
+exp(cbind(OR = coef(model), confint(model)))
+```
+
+```{r}
+library(pROC)
+#"grupo","sex","age","doble_negativas_γ.δ","doble_negativas_no_γ.δ"
+df_complete <- na.omit(df_model[, c("grupo","sex","age","doble_negativas_γ.δ","doble_negativas_no_γ.δ")])
+roc_obj <- pROC::roc(df_complete$grupo, predict(glm(grupo ~ age+ sex+ doble_negativas_no_γ.δ + doble_negativas_γ.δ , data=df_complete, family=binomial), type="response"))
+
+plot(roc_obj,
+     col="#2C7BB6",
+     lwd=3,
+     legacy.axes=TRUE,
+     xlim=c(0,1),
+     ylim=c(0,1),
+     main=paste0("ROC (AUC=", round(pROC::auc(roc_obj),3),")"))
+
+
+
+```
+
+```{r}
+library(pROC)
+
+roc_obj <- roc(df_complete$grupo, predict(model, type="response"))
+
+ci.auc(roc_obj)                    # CI AUC
+coords(roc_obj, "best", ret=c("threshold","sensitivity","specificity"))
+
+ci.coords(roc_obj, "best", ret=c("sensitivity","specificity"), boot.n=2000)
+```
+
+```{r}
+library(pROC)
+library(ggplot2)
+
+g <- ggroc(roc_obj, colour="#2C7BB6", size=1.2)
+
+g +
+  geom_abline(intercept=1, slope=1, linetype="dashed", color="grey") +
+  coord_equal(ylim=c(0,1)) +
+  scale_x_reverse(limits=c(1,0)) +   # ✅ AIXÒ ÉS LA CLAU
+  labs(
+    x="1 - Specificity",
+    y="Sensitivity",
+    title=paste0("ROC (AUC=", round(auc(roc_obj),3),")")
+  ) +
+  theme_minimal()
+
+
+```
