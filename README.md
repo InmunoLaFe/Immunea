@@ -1,2 +1,2 @@
 # Immunea
-Immunea is a research about immune system alterations in Alsheimer disease
+Immunea is a research about immune system alterations in Alzheimer disease
